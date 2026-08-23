@@ -52,7 +52,9 @@ appium-typescript-framework/
 │   ├── utils/                WaitUtils, GestureUtils, ScreenshotUtils, FileUtils, Logger
 │   └── types/                 framework.types.ts
 ├── test/
-│   ├── specs/               navigation, textFields, checkbox, datePicker, dialog, gesture
+│   ├── specs/
+│   │   ├── smoke/             smoke.spec.ts — 6 fast critical-path checks
+│   │   └── regression/        regression.spec.ts — 9 deeper/edge-case checks
 │   └── data/                 testData.json
 ├── config/
 │   ├── wdio.android.conf.ts  base config (assumes Appium already running — used in CI)
@@ -135,13 +137,15 @@ belong. Nothing in the source tree hard-codes a local path; see `src/config/envi
 2. **Run the tests.** `npm run test:local` starts Appium for you automatically
    (via `@wdio/appium-service`) and tears it down after the run:
    ```bash
-   npm run test:local
+   npm run test:local              # full suite (smoke + regression)
+   npm run test:smoke:local        # smoke only
+   npm run test:regression:local   # regression only
    ```
    If you'd rather manage the Appium server yourself (e.g. to watch its logs live), start it in one
    terminal and run against it in another:
    ```bash
    npm run appium:start        # terminal 1
-   npm run test:android        # terminal 2
+   npm run test:android        # terminal 2 — or test:smoke / test:regression
    ```
 3. **Generate and view the Allure report:**
    ```bash
@@ -161,10 +165,11 @@ npm run format:check   # Prettier --check — verified clean
 npm run clean           # wipe allure-results, allure-report, screenshots, logs, reports
 ```
 
-All four (`typecheck`, `lint`, `format:check`, and an install of the UiAutomator2 driver + a live
-Appium `/status` check) were run against this exact repository while building it and pass cleanly.
-Full emulator-based execution is exercised in CI (see below) and is the recommended way to see the
-suite run end-to-end if your local machine doesn't have an Android SDK/emulator set up.
+This isn't a paper claim: every command above — `typecheck`, `lint`, `format:check`, installing the
+pinned UiAutomator2 driver, and the full smoke + regression suite (15 tests, 6 + 9) — was run against
+this exact repository on a real booted emulator with the window visible (`emulator -avd Pixel_8`,
+Android 17/API 37), end to end, and passes. GitHub Actions (below) reproduces the same run headlessly
+on every push.
 
 ## GitHub Actions
 
@@ -184,23 +189,45 @@ To run it manually: **Actions → Mobile Tests → Run workflow**. A failing tes
 
 ## Test Coverage
 
-| #   | Spec                                                                 | Scenario                                               |
-| --- | -------------------------------------------------------------------- | ------------------------------------------------------ |
-| 1   | `navigation.spec.ts`                                                 | App launches, home screen displayed                    |
-| 2   | `navigation.spec.ts`                                                 | Home → Views navigation                                |
-| 3   | `textFields.spec.ts`                                                 | Text entry + validation                                |
-| 4   | `checkbox.spec.ts`                                                   | Checkbox selection + state validation                  |
-| 5   | `checkbox.spec.ts`                                                   | Radio button selection + mutual-exclusivity validation |
-| 6   | `datePicker.spec.ts`                                                 | Date picker dialog, date selection, validation         |
-| 7   | `dialog.spec.ts`                                                     | Alert dialog message validation, accept/cancel         |
-| 8   | `gesture.spec.ts`                                                    | Scroll reveals rows outside the initial viewport       |
-| 9   | `gesture.spec.ts`                                                    | Reusable swipe gesture utility                         |
-| 10  | _(all specs, via `afterTest` hook in `config/wdio.android.conf.ts`)_ | Automatic screenshot on any test failure               |
+Tests are organized into two tiers, mirroring how they'd be gated in CI — smoke on every push, the
+full regression suite on a schedule or before a release. Every scenario is written once; nothing is
+duplicated between the two suites.
 
-A long-press smoke test is included in `gesture.spec.ts` as well. `GestureUtils.dragAndDrop()` is
-implemented and available for reuse, but is not exercised by the default suite — ApiDemos' Drag and
-Drop screen doesn't expose stable resource-ids across builds, and this framework prefers stable
-locators over brittle ones (see `src/utils/GestureUtils.ts`).
+Automatic screenshot-on-failure applies to both, via the `afterTest` hook in
+`config/wdio.android.conf.ts`. `GestureUtils.dragAndDrop()` is implemented and available for reuse,
+but isn't exercised by either suite — ApiDemos' Drag and Drop screen doesn't expose stable
+resource-ids across builds, and this framework prefers stable locators over brittle ones (see
+`src/utils/GestureUtils.ts`).
+
+### Smoke — `test/specs/smoke/smoke.spec.ts` (`npm run test:smoke`)
+
+Fast, critical-path checks — one per major feature area, no edge cases.
+
+| #   | Scenario                                           |
+| --- | -------------------------------------------------- |
+| 1   | App launches, home screen displayed                |
+| 2   | Home → Views navigation                            |
+| 3   | Checkbox selection + checked-state validation      |
+| 4   | Radio button selection + selected-state validation |
+| 5   | Text field entry + validation                      |
+| 6   | Dialog: open, validate message, accept             |
+
+### Regression — `test/specs/regression/regression.spec.ts` (`npm run test:regression`)
+
+Deeper flows, independent-widget checks, and negative paths (cancel must actually discard state, not
+just close a dialog).
+
+| #   | Scenario                                                |
+| --- | ------------------------------------------------------- |
+| 1   | Text field accepts numeric input                        |
+| 2   | Text field is empty after clearing                      |
+| 3   | Checkbox 2 toggles independently of Checkbox 1          |
+| 4   | Radio group: "Clear" deselects the active option        |
+| 5   | Date picker: select + confirm updates the display       |
+| 6   | Date picker: cancel leaves the original date unchanged  |
+| 7   | Dialog: cancel dismisses without performing OK          |
+| 8   | Scroll reveals rows outside the initial viewport        |
+| 9   | Long press executes cleanly without breaking the screen |
 
 ## Environment Configuration
 

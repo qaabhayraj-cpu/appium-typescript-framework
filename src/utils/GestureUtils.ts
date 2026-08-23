@@ -109,7 +109,9 @@ export const GestureUtils = {
     // scrollIntoView() takes a bare `new UiSelector()...` expression — strip
     // the `android=` WDIO strategy prefix if the caller included one, or
     // it ends up embedded *inside* the outer expression as literal text.
-    const bareSelector = uiSelector.startsWith('android=') ? uiSelector.slice('android='.length) : uiSelector;
+    const bareSelector = uiSelector.startsWith('android=')
+      ? uiSelector.slice('android='.length)
+      : uiSelector;
     const scrollableSelector =
       `android=new UiScrollable(new UiSelector().scrollable(true)).setMaxSearchSwipes(${maxSwipes})` +
       `.scrollIntoView(${bareSelector})`;
@@ -121,7 +123,9 @@ export const GestureUtils = {
     // resolved *during* the scroll can end up pointing at whatever row was
     // recycled into that slot afterwards. Re-resolving fresh below, now
     // that the target is actually on-screen, avoids clicking the wrong row.
-    await browser.$(scrollableSelector).waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
+    await browser
+      .$(scrollableSelector)
+      .waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
     const target = browser.$(`android=${bareSelector}`);
     await target.waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
     return target.getElement();

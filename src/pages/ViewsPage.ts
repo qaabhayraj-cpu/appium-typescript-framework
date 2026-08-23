@@ -22,17 +22,21 @@ export class ViewsPage extends BasePage {
 
   private readonly button = `android=new UiSelector().resourceId("${AppConstants.APP_PACKAGE}:id/button")`;
   private readonly checkbox = `android=new UiSelector().resourceId("${AppConstants.APP_PACKAGE}:id/check1")`;
+  private readonly checkbox2 = `android=new UiSelector().resourceId("${AppConstants.APP_PACKAGE}:id/check2")`;
 
   // "Radio Group" is its own screen (a breakfast-menu RadioGroup demo) with
   // stable, named resource-ids per option — confirmed via `uiautomator dump`
   // against the real ApiDemos build, so we address options by id rather than
   // by fragile class/instance indexing.
   private readonly radioOptionIds = ['snack', 'breakfast', 'lunch', 'dinner', 'all'] as const;
+  private readonly radioClearButton = `android=new UiSelector().resourceId("${AppConstants.APP_PACKAGE}:id/clear")`;
 
   private radioButton(index: number): string {
     const id = this.radioOptionIds[index];
     if (!id) {
-      throw new Error(`No radio option at index ${index} (only 0-${this.radioOptionIds.length - 1} exist)`);
+      throw new Error(
+        `No radio option at index ${index} (only 0-${this.radioOptionIds.length - 1} exist)`,
+      );
     }
     return `android=new UiSelector().resourceId("${AppConstants.APP_PACKAGE}:id/${id}")`;
   }
@@ -107,6 +111,15 @@ export class ViewsPage extends BasePage {
     return this.isChecked(this.checkbox);
   }
 
+  /** The second checkbox on the same screen — used to verify checkboxes toggle independently. */
+  async toggleCheckbox2(): Promise<void> {
+    await this.click(this.checkbox2);
+  }
+
+  async isCheckbox2Checked(): Promise<boolean> {
+    return this.isChecked(this.checkbox2);
+  }
+
   // --- "Radio Group" widget interactions -------------------------------------
 
   async selectRadioOption(instance: number): Promise<void> {
@@ -115,6 +128,11 @@ export class ViewsPage extends BasePage {
 
   async isRadioOptionSelected(instance: number): Promise<boolean> {
     return this.isChecked(this.radioButton(instance));
+  }
+
+  /** Taps the "Clear" button, which deselects whichever radio option is currently checked. */
+  async clearRadioSelection(): Promise<void> {
+    await this.click(this.radioClearButton);
   }
 
   // --- Scroll / swipe playground ---------------------------------------------
