@@ -23,7 +23,8 @@
     "allure:generate": "allure generate ./allure-results --clean -o ./allure-report",
     "allure:open": "allure open ./allure-report",
     "allure:report": "npm run allure:generate && npm run allure:open",
-    "appium:install-driver": "appium driver install uiautomator2@4.2.9",
+    "appium:install-driver": "appium driver list --installed --json 2>/dev/null | grep -q '\"uiautomator2\"' || appium driver install uiautomator2@4.2.9",
+    "appium:verify-driver": "appium driver list --installed",
     "appium:start": "appium server --port 4723 --relaxed-security",
     "clean": "rimraf allure-results allure-report screenshots logs reports"
   },

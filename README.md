@@ -120,9 +120,15 @@ Prettier · GitHub Actions · Allure Reporting.
 
 - **UiAutomator2 driver is pinned to `4.2.9`.** As of this writing, `appium-uiautomator2-driver@5.0.0+`
   requires **Appium 3**, which is no longer compatible with the Appium 2 stack this framework targets.
-  `4.2.9` is the last release whose peer dependency is `appium ^2.4.1`. Both `npm run appium:install-driver`
-  and the CI workflow pin this version explicitly — installing the driver without a version (`appium driver
-install uiautomator2`) will pull an Appium‑3‑only build and fail to load.
+  `4.2.9` is the last release whose peer dependency is `appium ^2.4.1`. Installing the driver without a
+  version (`appium driver install uiautomator2`) will pull an Appium‑3‑only build and fail to load.
+- **The driver ships as a regular `package.json` devDependency**, not a separate install step. Appium
+  2's project-local driver management records an installed driver there automatically, so `npm ci`/
+  `npm install` alone restores it on any machine or CI runner — that's what both the workflow and a
+  fresh clone rely on. `npm run appium:install-driver` still exists as a convenience, but it's
+  idempotent: it checks `appium driver list --installed --json` first and only installs if the driver
+  is genuinely missing, since running `appium driver install` when it's already present fails with
+  "already installed" rather than silently succeeding.
 - To move this framework onto Appium 3 later, bump `appium` and drop the `@4.2.9` pin — no other code
   changes are required, since nothing here touches deprecated Appium 1 (`TouchAction`/JSONWP) APIs.
 

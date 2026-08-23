@@ -118,11 +118,19 @@ jobs:
           curl -fL --retry 3 --retry-delay 5 -o "${APP_PATH}" "${APK_URL}"
           ls -la apps/
 
-      # 7 & 8. Install Appium 2 and the UiAutomator2 driver
-      # Pinned to 4.2.9 — the last uiautomator2 driver release compatible with
-      # Appium 2.x (5.0.0+ requires Appium 3). See README > Version Notes.
-      - name: Install Appium driver (UiAutomator2)
-        run: npx appium driver install uiautomator2@4.2.9
+      # 7 & 8. Appium 2 and the UiAutomator2 driver (pinned to 4.2.9 — the
+      # last release compatible with Appium 2.x; 5.0.0+ requires Appium 3,
+      # see README > Version Notes). Both already came in via `npm ci` above:
+      # Appium 2's project-local driver management recorded
+      # appium-uiautomator2-driver as a real devDependency the first time it
+      # was installed (see package.json), so it's restored automatically on
+      # every install — no separate `appium driver install` step needed, and
+      # running one here would fail with "already installed". This step just
+      # verifies that came through correctly.
+      - name: Verify UiAutomator2 driver is present
+        run: |
+          npx appium driver list --installed
+          npx appium driver list --installed --json | grep -q '"uiautomator2"'
 
       - name: Cache AVD snapshot
         uses: actions/cache@v4
