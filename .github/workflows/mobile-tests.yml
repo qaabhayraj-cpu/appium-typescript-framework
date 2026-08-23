@@ -216,15 +216,29 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           disable-animations: true
+          # The actual root cause of every hang above, found by reading the
+          # log closely: `kill "$APPIUM_PID"` was failing silently on every
+          # run ("kill: Illegal number:") because this action does not run a
+          # multi-line script as one continuous shell — `$!`/`$APPIUM_PID`
+          # never survives from the line that backgrounds Appium to the line
+          # that's supposed to kill it. Appium (a Node process with its own
+          # children/open sockets) was left running as an orphan every time,
+          # and the emulator-runner action's post-script cleanup waits for
+          # the *entire* process tree the step spawned to exit — hence the
+          # hang, regardless of snapshot-save or kill-wait settings, which
+          # were never the actual blocker. `pkill -f` by process name doesn't
+          # depend on any shell state surviving between lines, so it works
+          # here where the PID-based kill silently didn't.
           script: |
             mkdir -p logs
             npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log &
-            APPIUM_PID=$!
             npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
             echo "Running: ${{ steps.suite.outputs.label }}"
             ${{ steps.suite.outputs.command }}
             TEST_EXIT_CODE=$?
-            kill "$APPIUM_PID" || true
+            pkill -TERM -f "appium server" || true
+            sleep 2
+            pkill -KILL -f "appium server" || true
             exit $TEST_EXIT_CODE
 
       # 12. Generate Allure report — always, so a failing suite still produces a report
