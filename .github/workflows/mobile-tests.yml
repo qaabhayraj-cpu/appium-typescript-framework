@@ -187,19 +187,38 @@ jobs:
 
       # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
       #
-      # Two independent hangs were reproduced here, back to back, both in
-      # reactivecircus/android-emulator-runner's post-script emulator
-      # shutdown — not in our test code (tests passed in under a minute both
-      # times):
-      #   1. Saving a snapshot of an emulator that just rendered a full test
-      #      run can hang indefinitely. Fixed by `-no-snapshot-save` — this
-      #      step restores from the snapshot the caching step below already
-      #      saved, so it never needs to save its own on exit.
-      #   2. Even with snapshot-save skipped, the emulator process itself can
-      #      still fail to exit after `adb emu kill`. `env.
-      #      ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 0` (named directly in
-      #      the action's own log output) skips its 20s "graceful shutdown"
-      #      wait and force-kills immediately instead.
+      # This step hung repeatedly during development — tests always passed in
+      # well under a minute, but the step itself then sat for 25-40+ minutes
+      # before something (usually the job timeout) ended it. Root-caused by
+      # reading full logs from several cancelled/timed-out runs rather than
+      # guessing:
+      #
+      #   - Saving a snapshot of an emulator that just rendered a full test
+      #     run can hang indefinitely (a known reactivecircus/android-
+      #     emulator-runner behavior). Fixed with `-no-snapshot-save` below —
+      #     this step restores from the snapshot the caching step already
+      #     saved, so it never needs to save its own on exit.
+      #   - Our own script wasn't reliably killing the backgrounded Appium
+      #     process: `$!` (its PID) doesn't survive from the line that
+      #     backgrounds it to a later line here, so `kill "$APPIUM_PID"` was
+      #     silently killing nothing ("kill: Illegal number:" in the log).
+      #     Fixed with a PID file instead of a shell variable — written on
+      #     the same line where `$!` is valid, read back from disk wherever
+      #     it's needed after, which survives regardless of whatever this
+      #     action's line/shell semantics are doing.
+      #   - Even with Appium correctly killed and `adb emu kill` succeeding
+      #     immediately, the step *still* hung the same way. That confirmed
+      #     the real, final cause: orphaned `crashpad_handler` processes (the
+      #     emulator's own crash-reporter children — see reactivecircus/
+      #     android-emulator-runner#385), which this action's cleanup waits
+      #     on but which don't reliably exit on their own. Killed explicitly
+      #     below, by exact process name (`pkill -x`, not `-f`) — `-f`
+      #     matches a process's full command line, which would match our own
+      #     `pkill -f crashpad_handler` line's argv and kill its own caller
+      #     (hit this exact self-match bug with an earlier `-f "appium
+      #     server"` attempt: tests passed, then the step failed with "exit
+      #     code null", i.e. killed by its own signal).
+      #
       # `timeout-minutes` bounds the damage if a hang recurs anyway: it fails
       # fast in ~12 minutes instead of silently eating the full 40-minute job
       # budget, and `if: always()` steps below (Allure/artifacts) still run.
@@ -216,42 +235,6 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           disable-animations: true
-          # The actual root cause of every hang above, found by reading the
-          # log closely: `kill "$APPIUM_PID"` was failing silently on every
-          # run ("kill: Illegal number:") because `$!` (the backgrounded
-          # Appium PID) doesn't reliably survive from the line that
-          # backgrounds it to a later line — most likely because this
-          # action's non-interactive script execution runs with job control
-          # off, which POSIX shells are allowed to do and which specifically
-          # affects `&`/`$!`, not ordinary sequential execution. Appium (a
-          # Node process with its own children/open sockets) was left
-          # running as an orphan every time, and the emulator-runner
-          # action's post-script cleanup waits for the *entire* process tree
-          # the step spawned to exit — hence the hang, regardless of
-          # snapshot-save or kill-wait settings, which were never the actual
-          # blocker.
-          #
-          # Two fix attempts confirmed what does and doesn't survive a line
-          # boundary here:
-          #   - `pkill -f "appium server"` backfired: pkill matches a
-          #     process's *entire* command line, including the shell
-          #     currently running the `pkill -f "appium server"` line itself
-          #     (that string is literally present in its own argv) — it
-          #     killed its own caller (tests passed, then the step failed
-          #     with "exit code null", i.e. killed by a signal).
-          #   - Chaining the kill/exit logic onto the test command's own
-          #     line with `;` also backfired, in a *different* way: nothing
-          #     after the test command ran at all — no kill, no explicit
-          #     exit, just silence until the 12-minute cap. Reverted that;
-          #     `TEST_EXIT_CODE=$?`, `kill`, and `exit` as their own
-          #     separate lines is exactly the structure the very first
-          #     "Illegal number" run already proved executes in full
-          #     sequence (each appeared as its own traced command) — only
-          #     the PID it read was empty. A PID file fixes that specific,
-          #     narrow problem without changing a structure that otherwise
-          #     already works: written in the same line where `$!` is still
-          #     valid, read back from disk (not a variable) wherever it's
-          #     needed after.
           script: |
             mkdir -p logs
             npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log & echo $! > /tmp/appium.pid
@@ -262,6 +245,9 @@ jobs:
             kill -TERM "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
             sleep 2
             kill -KILL "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
+            pkill -TERM -x crashpad_handler 2>/dev/null || true
+            sleep 1
+            pkill -KILL -x crashpad_handler 2>/dev/null || true
             exit $TEST_EXIT_CODE
 
       # 12. Generate Allure report — always, so a failing suite still produces a report
