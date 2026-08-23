@@ -173,25 +173,48 @@ on every push.
 
 ## GitHub Actions
 
-The workflow at `.github/workflows/mobile-tests.yml` runs on `push`, `pull_request`, and
-`workflow_dispatch`, with two jobs:
+The workflow at `.github/workflows/mobile-tests.yml` runs on `push`, `pull_request`,
+`workflow_dispatch`, and a daily `schedule`, with two jobs:
 
 1. **`static-checks`** — install, typecheck, lint, format-check. Fast, no emulator.
 2. **`android-tests`** (needs `static-checks`) — boots a real Android emulator (via
    `reactivecircus/android-emulator-runner`, cached across runs), starts Appium 2 with the pinned
-   UiAutomator2 driver, downloads the ApiDemos APK, runs the full suite, generates the Allure report,
-   and uploads `allure-results`, `allure-report`, `screenshots`, and `test-logs` as artifacts — all
-   under `if: always()`, so a failing suite still leaves you a downloadable report.
+   UiAutomator2 driver, downloads the ApiDemos APK, runs the resolved suite (see below), generates the
+   Allure report, and uploads `allure-results`, `allure-report`, `screenshots`, and `test-logs` as
+   artifacts — all under `if: always()`, so a failing suite still leaves you a downloadable report.
 
-To run it manually: **Actions → Mobile Tests → Run workflow**. A failing test suite fails the job
-(and the workflow run) by default — the artifact/report steps still execute because they carry
-`if: always()`.
+### Which suite runs when
+
+A "Determine which suite to run" step resolves this per trigger, so the same workflow serves all four
+cases without duplicating any job:
+
+| Trigger                    | Suite                                                             |
+| -------------------------- | ----------------------------------------------------------------- |
+| `push` / `pull_request`    | Full suite (smoke + regression)                                   |
+| `workflow_dispatch`        | Whichever `suite` input you pick (`all` / `smoke` / `regression`) |
+| Scheduled, 06:00 IST daily | `smoke` only                                                      |
+| Scheduled, 22:00 IST daily | `regression` only                                                 |
+
+The two schedules are cron entries in UTC (GitHub Actions cron is always UTC; IST is UTC+5:30):
+`30 0 * * *` (06:00 IST) and `30 16 * * *` (22:00 IST). A step matches `github.event.schedule` against
+these exact strings to pick `npm run test:smoke` or `npm run test:regression`.
+
+To run it manually: **Actions → Mobile Tests → Run workflow**, choosing a `suite`. A failing test
+suite fails the job (and the workflow run) by default — the artifact/report steps still execute
+because they carry `if: always()`.
+
+> **Scheduled workflows only fire once this repo is pushed to GitHub**, and only run against the
+> default branch (a GitHub Actions platform restriction, not something this workflow controls) — a
+> local clone or an unpushed branch will never trigger them. GitHub also does not guarantee schedules
+> fire at the exact minute during periods of high load; expect runs within a few minutes of 06:00/22:00
+> IST, not to-the-second.
 
 ## Test Coverage
 
-Tests are organized into two tiers, mirroring how they'd be gated in CI — smoke on every push, the
-full regression suite on a schedule or before a release. Every scenario is written once; nothing is
-duplicated between the two suites.
+Tests are organized into two tiers, mirroring how they'd be gated in CI — smoke daily at 06:00 IST,
+regression daily at 22:00 IST, and the full combination on every push/PR (see GitHub Actions above for
+exactly which trigger runs which). Every scenario is written once; nothing is duplicated between the
+two suites.
 
 Automatic screenshot-on-failure applies to both, via the `afterTest` hook in
 `config/wdio.android.conf.ts`. `GestureUtils.dragAndDrop()` is implemented and available for reuse,

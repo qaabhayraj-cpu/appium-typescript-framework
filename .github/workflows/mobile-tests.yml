@@ -10,6 +10,16 @@ on:
         description: 'Android API level to run against'
         required: false
         default: '30'
+      suite:
+        description: 'Which suite to run'
+        required: false
+        default: 'all'
+        type: choice
+        options: ['all', 'smoke', 'regression']
+  schedule:
+    # GitHub Actions cron is UTC; IST is UTC+5:30.
+    - cron: '30 0 * * *' # 06:00 IST daily — smoke
+    - cron: '30 16 * * *' # 22:00 IST daily — regression
 
 env:
   APK_URL: https://github.com/appium/appium/raw/1.x/sample-code/apps/ApiDemos-debug.apk
@@ -125,6 +135,37 @@ jobs:
           disable-animations: true
           script: echo "AVD created and cached."
 
+      # Resolve which suite this run should execute:
+      #  - scheduled 06:00 IST run  -> smoke only
+      #  - scheduled 22:00 IST run  -> regression only
+      #  - manual dispatch          -> whatever `suite` input was chosen
+      #  - push / pull_request      -> full suite (smoke + regression)
+      - name: Determine which suite to run
+        id: suite
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            case "${{ github.event.schedule }}" in
+              '30 0 * * *')
+                echo "command=npm run test:smoke" >> "$GITHUB_OUTPUT"
+                echo "label=smoke (scheduled 06:00 IST)" >> "$GITHUB_OUTPUT"
+                ;;
+              '30 16 * * *')
+                echo "command=npm run test:regression" >> "$GITHUB_OUTPUT"
+                echo "label=regression (scheduled 22:00 IST)" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "command=npm run test:android" >> "$GITHUB_OUTPUT"
+                echo "label=full suite (unrecognized schedule: ${{ github.event.schedule }})" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+          elif [ "${{ inputs.suite || 'all' }}" != "all" ]; then
+            echo "command=npm run test:${{ inputs.suite }}" >> "$GITHUB_OUTPUT"
+            echo "label=${{ inputs.suite }} (manual dispatch)" >> "$GITHUB_OUTPUT"
+          else
+            echo "command=npm run test:android" >> "$GITHUB_OUTPUT"
+            echo "label=full suite (${{ github.event_name }})" >> "$GITHUB_OUTPUT"
+          fi
+
       # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
       - name: Boot emulator, start Appium, and run tests
         uses: reactivecircus/android-emulator-runner@v2
@@ -141,7 +182,8 @@ jobs:
             npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log &
             APPIUM_PID=$!
             npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
-            npm run test:android
+            echo "Running: ${{ steps.suite.outputs.label }}"
+            ${{ steps.suite.outputs.command }}
             TEST_EXIT_CODE=$?
             kill "$APPIUM_PID" || true
             exit $TEST_EXIT_CODE
@@ -155,6 +197,7 @@ jobs:
         if: always()
         run: |
           echo "## Mobile Test Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Suite: ${{ steps.suite.outputs.label }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Environment: Android emulator (API ${{ inputs.api-level || '30' }}), UiAutomator2" >> "$GITHUB_STEP_SUMMARY"
           echo "- Allure results: see the *allure-report* artifact" >> "$GITHUB_STEP_SUMMARY"
           echo "- Screenshots (failures only): see the *screenshots* artifact" >> "$GITHUB_STEP_SUMMARY"
