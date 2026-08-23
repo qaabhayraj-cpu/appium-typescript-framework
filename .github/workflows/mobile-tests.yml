@@ -32,6 +32,15 @@ on:
     - cron: '30 0 * * *' # 06:00 IST daily — smoke
     - cron: '30 16 * * *' # 22:00 IST daily — regression
 
+# A new push/dispatch on the same ref cancels whatever's already running for
+# it, rather than letting two emulator jobs race each other. Scheduled runs
+# get their own group per cron schedule so a smoke run never cancels a
+# regression run (or vice versa) just for landing at a similar time.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && github.event.schedule || '' }}
+  cancel-in-progress: true
+
 env:
   APK_URL: https://github.com/appium/appium/raw/1.x/sample-code/apps/ApiDemos-debug.apk
   APP_PATH: ./apps/ApiDemos-debug.apk
@@ -187,40 +196,17 @@ jobs:
 
       # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
       #
-      # This step used to `uses: reactivecircus/android-emulator-runner@v2`
-      # for boot + script + shutdown, and hung repeatedly during development:
-      # tests always passed in well under a minute, but the step then sat for
-      # 25-40+ minutes before something (usually the job timeout) ended it.
-      # Root-caused across several cancelled/timed-out runs, not guessed:
-      # a snapshot-save-on-shutdown hang (fixed with `-no-snapshot-save`),
-      # then our own script not reliably killing the backgrounded Appium
-      # process (`$!` didn't survive to a later line — fixed with a PID
-      # file), then confirmed — with Appium correctly killed and `adb emu
-      # kill` succeeding immediately, logged proof the step *still* hung the
-      # same way regardless — that the true cause was orphaned
-      # `crashpad_handler` processes (the emulator's own crash-reporter
-      # children; see reactivecircus/android-emulator-runner#385) that this
-      # action's own post-script cleanup waits on but that don't reliably
-      # exit. Killing those explicitly (by exact name, not `pkill -f`, which
-      # self-matched and killed its own caller in an earlier attempt) *still*
-      # didn't stop the hang.
-      #
-      # At that point every fix targeted a real, confirmed bug — and the step
-      # still hung on every single run. That's not "one more flag to try", it's
-      # a sign the actual blocker is inside this action's own opaque
-      # post-script wait, not anything reachable from our script at all. So
-      # this step no longer uses that action for boot/run/shutdown — only the
-      # AVD-creation/caching step above still does, since it has never hung
-      # across every attempt here (a fresh, idle emulator has far less to
-      # clean up than one that just rendered a full test run). This step
-      # instead runs the emulator directly as a plain background process
-      # under our own control, restoring the AVD ("test" — this action's
-      # documented default name) and snapshot the caching step already
-      # created. Being a plain `run:` step rather than a composite action
-      # means it's one continuous bash process end to end: `$!`/`$?` behave
-      # normally with no line-boundary surprises, and — critically — the step
-      # ends the moment our own script's `exit` runs, with no other party's
-      # cleanup logic left to hang on.
+      # Boots the emulator directly as a plain background process under our
+      # own control, rather than via `reactivecircus/android-emulator-runner`
+      # (still used below for AVD creation/caching only): that action's
+      # post-script cleanup was found to hang indefinitely waiting on
+      # orphaned `crashpad_handler` processes after a test run — see
+      # reactivecircus/android-emulator-runner#385 — with no reliable
+      # workaround from the outside. A plain `run:` step sidesteps it
+      # entirely: one continuous bash process end to end, and it ends the
+      # moment our own `exit` runs, with no other party's cleanup left to
+      # hang on. Restores the AVD ("test", this action's documented default
+      # name) and snapshot the caching step below already created.
       - name: Boot emulator, start Appium, and run tests
         timeout-minutes: 12
         run: |
