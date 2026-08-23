@@ -218,41 +218,51 @@ jobs:
           disable-animations: true
           # The actual root cause of every hang above, found by reading the
           # log closely: `kill "$APPIUM_PID"` was failing silently on every
-          # run ("kill: Illegal number:") because this action does not run a
-          # multi-line script as one continuous shell — `$!`/`$APPIUM_PID`
-          # never survives from the line that backgrounds Appium to the line
-          # that's supposed to kill it. Appium (a Node process with its own
-          # children/open sockets) was left running as an orphan every time,
-          # and the emulator-runner action's post-script cleanup waits for
-          # the *entire* process tree the step spawned to exit — hence the
-          # hang, regardless of snapshot-save or kill-wait settings, which
-          # were never the actual blocker.
+          # run ("kill: Illegal number:") because `$!` (the backgrounded
+          # Appium PID) doesn't reliably survive from the line that
+          # backgrounds it to a later line — most likely because this
+          # action's non-interactive script execution runs with job control
+          # off, which POSIX shells are allowed to do and which specifically
+          # affects `&`/`$!`, not ordinary sequential execution. Appium (a
+          # Node process with its own children/open sockets) was left
+          # running as an orphan every time, and the emulator-runner
+          # action's post-script cleanup waits for the *entire* process tree
+          # the step spawned to exit — hence the hang, regardless of
+          # snapshot-save or kill-wait settings, which were never the actual
+          # blocker.
           #
-          # A first attempt at fixing this with `pkill -f "appium server"`
-          # backfired: pkill matches the *full command line* of every
-          # process, including the shell currently running the `pkill -f
-          # "appium server"` line itself (that string is literally present in
-          # its own argv) — so it killed its own caller (tests still passed:
-          # "6 passing", then the step failed with "exit code null", i.e.
-          # killed by a signal). A PID file avoids both problems: it's
-          # written in the same line/shell invocation where `$!` is still
-          # valid, persists across the per-line shell boundary on disk
-          # instead of in a variable, and `kill <pid>` can't self-match the
-          # way a pattern search can.
-          #
-          # For the same reason, capturing the test command's exit code and
-          # acting on it (kill Appium, then exit with that same code) is all
-          # chained with `;` on the one line right after it, rather than
-          # split across separate lines — this exit code is what makes the
-          # whole job fail when tests fail, so it can't be left depending on
-          # `$?` correctly surviving a line boundary that other state
-          # demonstrably hasn't survived here.
+          # Two fix attempts confirmed what does and doesn't survive a line
+          # boundary here:
+          #   - `pkill -f "appium server"` backfired: pkill matches a
+          #     process's *entire* command line, including the shell
+          #     currently running the `pkill -f "appium server"` line itself
+          #     (that string is literally present in its own argv) — it
+          #     killed its own caller (tests passed, then the step failed
+          #     with "exit code null", i.e. killed by a signal).
+          #   - Chaining the kill/exit logic onto the test command's own
+          #     line with `;` also backfired, in a *different* way: nothing
+          #     after the test command ran at all — no kill, no explicit
+          #     exit, just silence until the 12-minute cap. Reverted that;
+          #     `TEST_EXIT_CODE=$?`, `kill`, and `exit` as their own
+          #     separate lines is exactly the structure the very first
+          #     "Illegal number" run already proved executes in full
+          #     sequence (each appeared as its own traced command) — only
+          #     the PID it read was empty. A PID file fixes that specific,
+          #     narrow problem without changing a structure that otherwise
+          #     already works: written in the same line where `$!` is still
+          #     valid, read back from disk (not a variable) wherever it's
+          #     needed after.
           script: |
             mkdir -p logs
             npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log & echo $! > /tmp/appium.pid
             npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
             echo "Running: ${{ steps.suite.outputs.label }}"
-            ${{ steps.suite.outputs.command }}; TEST_EXIT_CODE=$?; kill -TERM "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true; sleep 2; kill -KILL "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true; exit $TEST_EXIT_CODE
+            ${{ steps.suite.outputs.command }}
+            TEST_EXIT_CODE=$?
+            kill -TERM "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
+            sleep 2
+            kill -KILL "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
+            exit $TEST_EXIT_CODE
 
       # 12. Generate Allure report — always, so a failing suite still produces a report
       - name: Generate Allure report
