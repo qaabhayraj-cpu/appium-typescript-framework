@@ -1,9 +1,49 @@
 # Appium TypeScript Framework
 
+[![Mobile Tests](https://github.com/qaabhayraj-cpu/appium-typescript-framework/actions/workflows/mobile-tests.yml/badge.svg)](https://github.com/qaabhayraj-cpu/appium-typescript-framework/actions/workflows/mobile-tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518.20-339933?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![Appium](https://img.shields.io/badge/Appium-2-4B0082)](https://appium.io)
+[![Tests](https://img.shields.io/badge/tests-15%20passing-brightgreen)](#test-coverage)
+
 A production-quality, scalable **Android mobile automation framework** built with TypeScript,
 WebdriverIO, Appium 2, and UiAutomator2 — driving the [Android ApiDemos](https://github.com/appium/appium)
 sample app as the application under test. Built as a Senior QA Automation / SDET portfolio piece
 and interview demonstration; not a loose collection of scripts.
+
+**Repository:** https://github.com/qaabhayraj-cpu/appium-typescript-framework
+
+## At a Glance
+
+- **15 automated tests** (6 smoke + 9 regression) covering navigation, forms, checkboxes, radio
+  buttons, a date picker, alert dialogs, and gestures — run and verified passing on a real, visible
+  Android emulator, not just typechecked.
+- **Runs itself, on a schedule.** Every day: smoke at 06:00 IST, full regression at 22:00 IST, plus a
+  full run on every push/PR — all via GitHub Actions, no manual trigger needed.
+- **Every run produces evidence.** An Allure report every time; screenshots automatically on any
+  failure — both downloadable as artifacts from the GitHub Actions run, no local setup required to
+  review results.
+- **Zero hard-coded paths or secrets.** Fully driven by environment variables (`.env.example`) — the
+  same code runs unchanged on a developer laptop, a CI runner, or a client's machine.
+
+### The app under test (ApiDemos on a live emulator)
+
+<table>
+<tr>
+<td align="center"><img src="docs/images/app-home-screen.png" width="230" alt="ApiDemos home screen"/><br/><sub>Home</sub></td>
+<td align="center"><img src="docs/images/views-screen.png" width="230" alt="Views submenu"/><br/><sub>Views submenu</sub></td>
+<td align="center"><img src="docs/images/dialog-demo.png" width="230" alt="Alert dialog interaction"/><br/><sub>Alert dialog (Test 7)</sub></td>
+</tr>
+</table>
+
+### See it running
+
+- **Latest CI run:** [Actions → Mobile Tests](https://github.com/qaabhayraj-cpu/appium-typescript-framework/actions/workflows/mobile-tests.yml)
+- **Full report from any run:** open that run → scroll to _Artifacts_ → download `allure-report` →
+  open `index.html` locally (Allure reports are static HTML, no server needed to view them)
+- **Run it live, on screen:** see [Local Execution](#local-execution) below — `npm run test:smoke:local`
+  boots a visible emulator window and drives the app in real time
 
 ## Project Overview
 
@@ -109,7 +149,7 @@ repo's `.mcp.json` will pick it up automatically.
 ## Installation
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/qaabhayraj-cpu/appium-typescript-framework.git
 cd appium-typescript-framework
 npm install
 
