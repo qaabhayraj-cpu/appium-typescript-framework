@@ -14,6 +14,7 @@ describe('Text Field', () => {
   const textFieldsPage = new TextFieldsPage();
 
   beforeEach(async () => {
+    await homePage.restartApp();
     await homePage.waitForScreen();
     await homePage.navigateToViews();
     await viewsPage.waitForScreen();
@@ -23,8 +24,8 @@ describe('Text Field', () => {
   it('enters text into the text field and validates it', async () => {
     Logger.info('Starting test: text field entry');
 
-    Logger.info('Navigating to Views > Controls > 9. TextFields');
-    await viewsPage.openControlsTextFields();
+    Logger.info('Navigating to Views > TextFields');
+    await viewsPage.openTextFields();
     await textFieldsPage.waitForScreen();
 
     const { validText } = testData.textField;
@@ -37,7 +38,7 @@ describe('Text Field', () => {
   });
 
   it('accepts numeric text into the text field', async () => {
-    await viewsPage.openControlsTextFields();
+    await viewsPage.openTextFields();
     await textFieldsPage.waitForScreen();
 
     const { numericText } = testData.textField;

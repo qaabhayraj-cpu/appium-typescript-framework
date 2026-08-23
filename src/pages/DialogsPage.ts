@@ -10,7 +10,9 @@ export class DialogsPage extends BasePage {
   private readonly messageDialogTrigger = 'OK Cancel dialog with a message';
 
   // Standard AOSP AlertDialog ids — stable across the OS, not the app.
-  private readonly dialogMessage = 'android=new UiSelector().resourceId("android:id/message")';
+  // Confirmed via `uiautomator dump`: this dialog variant renders its body
+  // text in `alertTitle` (there's no separate `message` TextView present).
+  private readonly dialogMessage = 'android=new UiSelector().resourceId("android:id/alertTitle")';
   private readonly okButton = 'android=new UiSelector().resourceId("android:id/button1")';
   private readonly cancelButton = 'android=new UiSelector().resourceId("android:id/button2")';
 

@@ -8,6 +8,7 @@ describe('Checkbox and Radio Button', () => {
   const viewsPage = new ViewsPage();
 
   beforeEach(async () => {
+    await homePage.restartApp();
     await homePage.waitForScreen();
     await homePage.navigateToViews();
     await viewsPage.waitForScreen();

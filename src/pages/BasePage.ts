@@ -80,10 +80,18 @@ export abstract class BasePage {
     return el.isDisplayed().catch(() => false);
   }
 
-  /** Returns whether a checkbox/radio/switch-like element is currently checked/selected. */
-  async isSelected(selector: Selector): Promise<boolean> {
+  /**
+   * Returns whether a checkbox/radio/switch-like element is currently
+   * checked. Deliberately reads the Android `checked` accessibility
+   * attribute rather than calling WebDriver's `isSelected()` — on Android,
+   * "selected" and "checked" are two distinct AccessibilityNodeInfo flags,
+   * and `isSelected()` reports the former, which stays false for
+   * CheckBox/RadioButton widgets regardless of their checked state.
+   */
+  async isChecked(selector: Selector): Promise<boolean> {
     const el = await this.element(selector);
-    return el.isSelected();
+    const checked = await el.getAttribute('checked');
+    return checked === 'true';
   }
 
   /** Scrolls an Android scrollable container until the element is in view, returning it. */
@@ -115,5 +123,19 @@ export abstract class BasePage {
   async tapListItem(label: string): Promise<void> {
     Logger.info(`Tapping list item: "${label}"`);
     await this.click(this.listItemSelector(label));
+  }
+
+  /**
+   * Terminates and relaunches the app under test, landing back on the Home
+   * screen. WDIO runs every `it` in a spec file inside one shared app
+   * session, so without an explicit reset a test starts wherever the
+   * previous one left off. Call this as the first line of a spec's
+   * `beforeEach` (not in a wdio-level `beforeTest` hook — see the comment in
+   * `config/wdio.android.conf.ts` for why that ordering matters).
+   */
+  async restartApp(): Promise<void> {
+    Logger.info('Restarting app for test isolation');
+    await browser.terminateApp(AppConstants.APP_PACKAGE);
+    await browser.activateApp(AppConstants.APP_PACKAGE);
   }
 }

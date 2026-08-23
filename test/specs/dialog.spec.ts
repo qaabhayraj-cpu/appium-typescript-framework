@@ -8,6 +8,7 @@ describe('Dialog', () => {
   const dialogsPage = new DialogsPage();
 
   beforeEach(async () => {
+    await homePage.restartApp();
     await homePage.waitForScreen();
     await homePage.navigateToApp();
     await homePage.openCategory('Alert Dialogs');

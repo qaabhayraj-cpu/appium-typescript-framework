@@ -95,22 +95,35 @@ export const GestureUtils = {
 
   /**
    * Scrolls an Android scrollable container until the element matched by
-   * `uiSelector` (an `-android uiautomator` UiSelector expression) becomes
-   * visible, then returns it. Uses UiAutomator2's native `UiScrollable`
-   * support, which is far more reliable on long lists than repeated manual
-   * swipes.
+   * `uiSelector` (a `new UiSelector()...` expression, with or without the
+   * leading `android=` WDIO strategy prefix — either is accepted since
+   * callers commonly reuse a selector built for direct use with `browser.$`)
+   * becomes visible, then returns it. Uses UiAutomator2's native
+   * `UiScrollable` support, which is far more reliable on long lists than
+   * repeated manual swipes.
    */
   async scrollToElement(
     uiSelector: string,
     maxSwipes = AppConstants.TIMEOUTS.SHORT_MS / 500,
   ): Promise<WebdriverIO.Element> {
+    // scrollIntoView() takes a bare `new UiSelector()...` expression — strip
+    // the `android=` WDIO strategy prefix if the caller included one, or
+    // it ends up embedded *inside* the outer expression as literal text.
+    const bareSelector = uiSelector.startsWith('android=') ? uiSelector.slice('android='.length) : uiSelector;
     const scrollableSelector =
       `android=new UiScrollable(new UiSelector().scrollable(true)).setMaxSearchSwipes(${maxSwipes})` +
-      `.scrollIntoView(${uiSelector})`;
+      `.scrollIntoView(${bareSelector})`;
 
-    Logger.info(`Scrolling to element via UiScrollable: ${uiSelector}`);
-    const chainableElement = browser.$(scrollableSelector);
-    await chainableElement.waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
-    return chainableElement.getElement();
+    Logger.info(`Scrolling to element via UiScrollable: ${bareSelector}`);
+    // Trigger the scroll and wait for it to land, but discard this element
+    // handle rather than returning/clicking it directly: Android's
+    // ListView/RecyclerView recycle their row views, so a reference
+    // resolved *during* the scroll can end up pointing at whatever row was
+    // recycled into that slot afterwards. Re-resolving fresh below, now
+    // that the target is actually on-screen, avoids clicking the wrong row.
+    await browser.$(scrollableSelector).waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
+    const target = browser.$(`android=${bareSelector}`);
+    await target.waitForDisplayed({ timeout: AppConstants.TIMEOUTS.DEFAULT_MS });
+    return target.getElement();
   },
 };

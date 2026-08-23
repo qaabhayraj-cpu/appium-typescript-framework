@@ -7,6 +7,10 @@ describe('Navigation', () => {
   const homePage = new HomePage();
   const viewsPage = new ViewsPage();
 
+  beforeEach(async () => {
+    await homePage.restartApp();
+  });
+
   // Test 1 — Application Launch
   it('launches the ApiDemos app and displays the home screen', async () => {
     Logger.info('Starting test: application launch');

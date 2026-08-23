@@ -66,6 +66,13 @@ export const config: TestrunnerConfig = {
     Logger.info('Session started');
   },
 
+  // NOTE: app-relaunch-per-test intentionally does NOT live here. WDIO fires
+  // `beforeTest` *after* Mocha's own `beforeEach` hooks have already run, so
+  // resetting the app here would wipe out any navigation a spec's
+  // `beforeEach` just performed. Instead, each spec calls
+  // `BasePage.restartApp()` as the first line of its own `beforeEach` (see
+  // e.g. `test/specs/checkbox.spec.ts`), keeping relaunch-then-navigate in
+  // one predictable, explicit order.
   beforeTest(test): void {
     Logger.info(`Starting test: ${test.parent} > ${test.title}`);
   },

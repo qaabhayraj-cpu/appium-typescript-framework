@@ -14,6 +14,7 @@ describe('Date Picker', () => {
   const dateWidgetsPage = new DateWidgetsPage();
 
   beforeEach(async () => {
+    await homePage.restartApp();
     await homePage.waitForScreen();
     await homePage.navigateToViews();
     await viewsPage.waitForScreen();
