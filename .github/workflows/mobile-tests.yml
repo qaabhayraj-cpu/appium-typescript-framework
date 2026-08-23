@@ -187,68 +187,88 @@ jobs:
 
       # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
       #
-      # This step hung repeatedly during development — tests always passed in
-      # well under a minute, but the step itself then sat for 25-40+ minutes
-      # before something (usually the job timeout) ended it. Root-caused by
-      # reading full logs from several cancelled/timed-out runs rather than
-      # guessing:
+      # This step used to `uses: reactivecircus/android-emulator-runner@v2`
+      # for boot + script + shutdown, and hung repeatedly during development:
+      # tests always passed in well under a minute, but the step then sat for
+      # 25-40+ minutes before something (usually the job timeout) ended it.
+      # Root-caused across several cancelled/timed-out runs, not guessed:
+      # a snapshot-save-on-shutdown hang (fixed with `-no-snapshot-save`),
+      # then our own script not reliably killing the backgrounded Appium
+      # process (`$!` didn't survive to a later line — fixed with a PID
+      # file), then confirmed — with Appium correctly killed and `adb emu
+      # kill` succeeding immediately, logged proof the step *still* hung the
+      # same way regardless — that the true cause was orphaned
+      # `crashpad_handler` processes (the emulator's own crash-reporter
+      # children; see reactivecircus/android-emulator-runner#385) that this
+      # action's own post-script cleanup waits on but that don't reliably
+      # exit. Killing those explicitly (by exact name, not `pkill -f`, which
+      # self-matched and killed its own caller in an earlier attempt) *still*
+      # didn't stop the hang.
       #
-      #   - Saving a snapshot of an emulator that just rendered a full test
-      #     run can hang indefinitely (a known reactivecircus/android-
-      #     emulator-runner behavior). Fixed with `-no-snapshot-save` below —
-      #     this step restores from the snapshot the caching step already
-      #     saved, so it never needs to save its own on exit.
-      #   - Our own script wasn't reliably killing the backgrounded Appium
-      #     process: `$!` (its PID) doesn't survive from the line that
-      #     backgrounds it to a later line here, so `kill "$APPIUM_PID"` was
-      #     silently killing nothing ("kill: Illegal number:" in the log).
-      #     Fixed with a PID file instead of a shell variable — written on
-      #     the same line where `$!` is valid, read back from disk wherever
-      #     it's needed after, which survives regardless of whatever this
-      #     action's line/shell semantics are doing.
-      #   - Even with Appium correctly killed and `adb emu kill` succeeding
-      #     immediately, the step *still* hung the same way. That confirmed
-      #     the real, final cause: orphaned `crashpad_handler` processes (the
-      #     emulator's own crash-reporter children — see reactivecircus/
-      #     android-emulator-runner#385), which this action's cleanup waits
-      #     on but which don't reliably exit on their own. Killed explicitly
-      #     below, by exact process name (`pkill -x`, not `-f`) — `-f`
-      #     matches a process's full command line, which would match our own
-      #     `pkill -f crashpad_handler` line's argv and kill its own caller
-      #     (hit this exact self-match bug with an earlier `-f "appium
-      #     server"` attempt: tests passed, then the step failed with "exit
-      #     code null", i.e. killed by its own signal).
-      #
-      # `timeout-minutes` bounds the damage if a hang recurs anyway: it fails
-      # fast in ~12 minutes instead of silently eating the full 40-minute job
-      # budget, and `if: always()` steps below (Allure/artifacts) still run.
+      # At that point every fix targeted a real, confirmed bug — and the step
+      # still hung on every single run. That's not "one more flag to try", it's
+      # a sign the actual blocker is inside this action's own opaque
+      # post-script wait, not anything reachable from our script at all. So
+      # this step no longer uses that action for boot/run/shutdown — only the
+      # AVD-creation/caching step above still does, since it has never hung
+      # across every attempt here (a fresh, idle emulator has far less to
+      # clean up than one that just rendered a full test run). This step
+      # instead runs the emulator directly as a plain background process
+      # under our own control, restoring the AVD ("test" — this action's
+      # documented default name) and snapshot the caching step already
+      # created. Being a plain `run:` step rather than a composite action
+      # means it's one continuous bash process end to end: `$!`/`$?` behave
+      # normally with no line-boundary surprises, and — critically — the step
+      # ends the moment our own script's `exit` runs, with no other party's
+      # cleanup logic left to hang on.
       - name: Boot emulator, start Appium, and run tests
-        uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 12
-        env:
-          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: 0
-        with:
-          api-level: ${{ fromJSON(inputs.api-level || '30') }}
-          target: google_apis
-          arch: x86_64
-          profile: pixel_5
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
-          disable-animations: true
-          script: |
-            mkdir -p logs
-            npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log & echo $! > /tmp/appium.pid
-            npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
-            echo "Running: ${{ steps.suite.outputs.label }}"
-            ${{ steps.suite.outputs.command }}
-            TEST_EXIT_CODE=$?
-            kill -TERM "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
-            sleep 2
-            kill -KILL "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
-            pkill -TERM -x crashpad_handler 2>/dev/null || true
-            sleep 1
-            pkill -KILL -x crashpad_handler 2>/dev/null || true
-            exit $TEST_EXIT_CODE
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          mkdir -p logs
+
+          nohup emulator -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save > logs/emulator.log 2>&1 &
+          echo $! > /tmp/emulator.pid
+
+          adb wait-for-device
+          BOOT_COMPLETED=""
+          for i in $(seq 1 100); do
+            BOOT_COMPLETED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            if [ "$BOOT_COMPLETED" = "1" ]; then
+              break
+            fi
+            sleep 3
+          done
+          if [ "$BOOT_COMPLETED" != "1" ]; then
+            echo "::error::Emulator did not report sys.boot_completed=1 in time"
+            exit 1
+          fi
+          echo "Emulator booted."
+
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+
+          npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log & echo $! > /tmp/appium.pid
+          npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
+
+          echo "Running: ${{ steps.suite.outputs.label }}"
+          set +e
+          ${{ steps.suite.outputs.command }}
+          TEST_EXIT_CODE=$?
+          set -e
+
+          kill -TERM "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
+          sleep 1
+          kill -KILL "$(cat /tmp/appium.pid 2>/dev/null)" 2>/dev/null || true
+
+          adb -s emulator-5554 emu kill 2>/dev/null || true
+          sleep 2
+          kill -KILL "$(cat /tmp/emulator.pid 2>/dev/null)" 2>/dev/null || true
+          pkill -KILL -f qemu-system 2>/dev/null || true
+          pkill -KILL -x crashpad_handler 2>/dev/null || true
+
+          exit $TEST_EXIT_CODE
 
       # 12. Generate Allure report — always, so a failing suite still produces a report
       - name: Generate Allure report
