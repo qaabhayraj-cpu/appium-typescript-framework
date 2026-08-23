@@ -186,6 +186,14 @@ jobs:
           fi
 
       # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
+      #
+      # `-no-snapshot-save` is load-bearing, not cosmetic: without it, shutting
+      # down the emulator after tests finish can hang for 30+ minutes trying
+      # to serialize a snapshot (a known reactivecircus/android-emulator-runner
+      # issue, reproduced here — tests passed in 47s, then the run sat until
+      # the 40-minute job timeout cancelled it). This step restores from the
+      # snapshot the caching step below already saved; it never needs to save
+      # one of its own on exit.
       - name: Boot emulator, start Appium, and run tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -194,7 +202,7 @@ jobs:
           arch: x86_64
           profile: pixel_5
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           disable-animations: true
           script: |
             mkdir -p logs
