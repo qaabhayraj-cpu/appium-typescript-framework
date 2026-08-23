@@ -141,6 +141,27 @@ jobs:
           npx appium driver list --installed
           npx appium driver list --installed --json | grep -q '"uiautomator2"'
 
+      # The AVD cache below only ever covered ~/.android/avd (the AVD's own
+      # config/data) — not the actual system image binaries under
+      # $ANDROID_HOME/system-images, which live elsewhere and used to get
+      # installed as a side effect of the (now-removed) reactivecircus
+      # action always running for the test-execution step too. Once that
+      # step stopped using the action, a cache *hit* here (which skips "Create
+      # AVD snapshot for caching" below) meant nothing installed the system
+      # image at all — reproduced directly: `emulator -avd test` failed with
+      # "FATAL | Broken AVD system path" because
+      # system-images/android-30/google_apis/x86_64/ genuinely didn't exist,
+      # and our own script's plain `adb wait-for-device` then hung forever
+      # waiting for a device that could never appear, since nothing had
+      # actually started. Installing it explicitly here makes it unconditional
+      # and correct regardless of AVD cache state; caching it too (bumped to
+      # v2 since the cached path set changed) just avoids re-downloading it
+      # on every run.
+      - name: Install Android system image
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "system-images;android-${{ inputs.api-level || '30' }};google_apis;x86_64"
+
       - name: Cache AVD snapshot
         uses: actions/cache@v4
         id: avd-cache
@@ -148,7 +169,8 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ inputs.api-level || '30' }}-v1
+            ${{ env.ANDROID_HOME }}/system-images
+          key: avd-${{ inputs.api-level || '30' }}-v2
 
       - name: Create AVD snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -216,7 +238,17 @@ jobs:
           nohup emulator -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save > logs/emulator.log 2>&1 &
           echo $! > /tmp/emulator.pid
 
-          adb wait-for-device
+          # `adb wait-for-device` has no built-in timeout — if the emulator
+          # process fails to start (wrong system image, crash, etc.) it
+          # blocks forever waiting for a device that will never appear.
+          # Reproduced exactly this way once already. `timeout` bounds it and
+          # dumps the emulator's own log for diagnosis instead of leaving the
+          # 12-minute step cap as the only signal something's wrong.
+          if ! timeout 90 adb wait-for-device; then
+            echo "::error::adb wait-for-device timed out — emulator process likely failed to start"
+            cat logs/emulator.log || true
+            exit 1
+          fi
           BOOT_COMPLETED=""
           for i in $(seq 1 100); do
             BOOT_COMPLETED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
@@ -227,6 +259,7 @@ jobs:
           done
           if [ "$BOOT_COMPLETED" != "1" ]; then
             echo "::error::Emulator did not report sys.boot_completed=1 in time"
+            cat logs/emulator.log || true
             exit 1
           fi
           echo "Emulator booted."
