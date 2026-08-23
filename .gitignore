@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test reports & results
+allure-results/
+allure-report/
+reports/
+
+# Screenshots captured during test runs
+screenshots/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Appium / Android
+apps/*.apk
+!apps/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Misc
+*.tsbuildinfo
+.wdio-android.session.lock

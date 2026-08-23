@@ -1,0 +1,197 @@
+name: Mobile Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      api-level:
+        description: 'Android API level to run against'
+        required: false
+        default: '30'
+
+env:
+  APK_URL: https://github.com/appium/appium/raw/1.x/sample-code/apps/ApiDemos-debug.apk
+  APP_PATH: ./apps/ApiDemos-debug.apk
+  APPIUM_HOST: 127.0.0.1
+  APPIUM_PORT: '4723'
+  PLATFORM_VERSION: '11.0'
+  DEVICE_NAME: emulator-5554
+  TEST_ENV: CI
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast quality gate: type-checking + linting, no emulator required.
+  # ---------------------------------------------------------------------------
+  static-checks:
+    name: Type Check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run TypeScript type check
+        run: npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+  # ---------------------------------------------------------------------------
+  # Full end-to-end run: Android emulator + Appium 2 + UiAutomator2.
+  # ---------------------------------------------------------------------------
+  android-tests:
+    name: Android E2E Tests
+    needs: static-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. Install npm dependencies
+      - name: Install npm dependencies
+        run: npm ci
+
+      # 4. Setup Java
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 5. Setup Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Enable KVM hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download ApiDemos APK
+        run: |
+          mkdir -p apps
+          curl -fL --retry 3 --retry-delay 5 -o "${APP_PATH}" "${APK_URL}"
+          ls -la apps/
+
+      # 7 & 8. Install Appium 2 and the UiAutomator2 driver
+      # Pinned to 4.2.9 — the last uiautomator2 driver release compatible with
+      # Appium 2.x (5.0.0+ requires Appium 3). See README > Version Notes.
+      - name: Install Appium driver (UiAutomator2)
+        run: npx appium driver install uiautomator2@4.2.9
+
+      - name: Cache AVD snapshot
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ inputs.api-level || '30' }}-v1
+
+      - name: Create AVD snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ fromJSON(inputs.api-level || '30') }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: echo "AVD created and cached."
+
+      # 6 & 9. Start the Android Emulator, 10. Start Appium server, 11. Execute tests
+      - name: Boot emulator, start Appium, and run tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ fromJSON(inputs.api-level || '30') }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            mkdir -p logs
+            npx appium server --port "$APPIUM_PORT" --relaxed-security --log ./logs/appium.log &
+            APPIUM_PID=$!
+            npx wait-on -t 60000 "http://${APPIUM_HOST}:${APPIUM_PORT}/status"
+            npm run test:android
+            TEST_EXIT_CODE=$?
+            kill "$APPIUM_PID" || true
+            exit $TEST_EXIT_CODE
+
+      # 12. Generate Allure report — always, so a failing suite still produces a report
+      - name: Generate Allure report
+        if: always()
+        run: npm run allure:generate
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Mobile Test Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: Android emulator (API ${{ inputs.api-level || '30' }}), UiAutomator2" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Allure results: see the *allure-report* artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Screenshots (failures only): see the *screenshots* artifact" >> "$GITHUB_STEP_SUMMARY"
+
+      # 13. Upload screenshots and reports as GitHub Actions artifacts
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: logs/
+          retention-days: 14
+          if-no-files-found: ignore
