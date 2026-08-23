@@ -1,21 +1,32 @@
 name: Mobile Tests
 
+# Labels each run in the Actions list with which suite actually ran and why
+# (manual / scheduled / push) — otherwise every run just shows the commit
+# message, making it hard to tell a manual smoke dispatch apart from a
+# regression one at a glance.
+run-name: >-
+  ${{
+    github.event_name == 'workflow_dispatch' && format('Manual · {0} suite (API {1})', inputs.suite, inputs.api-level) ||
+    github.event_name == 'schedule' && format('Scheduled · {0}', github.event.schedule == '30 0 * * *' && 'smoke (06:00 IST)' || 'regression (22:00 IST)') ||
+    format('{0} · full suite', github.event_name)
+  }}
+
 on:
   push:
     branches: ['**']
   pull_request:
   workflow_dispatch:
     inputs:
+      suite:
+        description: 'Suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options: ['all', 'smoke', 'regression']
       api-level:
         description: 'Android API level to run against'
         required: false
         default: '30'
-      suite:
-        description: 'Which suite to run'
-        required: false
-        default: 'all'
-        type: choice
-        options: ['all', 'smoke', 'regression']
   schedule:
     # GitHub Actions cron is UTC; IST is UTC+5:30.
     - cron: '30 0 * * *' # 06:00 IST daily — smoke
