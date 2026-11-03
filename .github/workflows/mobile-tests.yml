@@ -111,8 +111,13 @@ jobs:
           java-version: '17'
 
       # 5. Setup Android SDK
+      # The action's default `packages` input is "tools platform-tools", but
+      # Google removed the legacy `tools` package from the SDK repository, so
+      # the default now fails with "Failed to find package 'tools'".
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools emulator'
 
       - name: Enable KVM hardware acceleration
         run: |
