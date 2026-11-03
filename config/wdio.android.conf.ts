@@ -19,6 +19,11 @@ type TestrunnerConfig = Options.Testrunner & Capabilities.WithRequestedTestrunne
  */
 export const config: TestrunnerConfig = {
   runner: 'local',
+  // WDIO 9 auto-wraps workers in `xvfb-run` on Linux when it's on PATH (now
+  // the case on GitHub's ubuntu runners). That wrapper breaks the
+  // launcher↔worker IPC channel ("Error: write EINVAL"), and a mobile suite
+  // never needs a virtual display anyway.
+  autoXvfb: false,
 
   // --- Appium connection -----------------------------------------------------
   hostname: env.appiumHost,
