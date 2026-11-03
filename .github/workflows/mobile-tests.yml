@@ -165,7 +165,17 @@ jobs:
       - name: Install Android system image
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "system-images;android-${{ inputs.api-level || '30' }};google_apis;x86_64"
+          # The ~1 GB image download occasionally arrives truncated ("Error on
+          # ZipFile unknown archive"), so retry, discarding any partial download.
+          PKG="system-images;android-${{ inputs.api-level || '30' }};google_apis;x86_64"
+          for attempt in 1 2 3; do
+            if sdkmanager --install "$PKG"; then exit 0; fi
+            echo "::warning::System image install failed (attempt $attempt/3); retrying"
+            rm -rf "$ANDROID_HOME/.temp" "$ANDROID_HOME/.downloadIntermediates"
+            sleep 10
+          done
+          echo "::error::System image install failed after 3 attempts"
+          exit 1
 
       - name: Cache AVD snapshot
         uses: actions/cache@v4
